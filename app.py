@@ -112,16 +112,16 @@ class ExpenseTrackerApp(tk.Tk):
         date = self.date_var.get().strip()
         description = self.desc_text.get("1.0", "end").strip()
 
-        # validate
+        # validate amount
         try:
             amt = float(amount)
             if amt <= 0:
                 raise ValueError("Amount must be > 0")
-        except Exception as e:
+        except Exception:
             self.add_status.config(text="❌ Invalid amount. Enter a number > 0.")
             return
 
-        # validate date format
+        # validate date
         try:
             datetime.strptime(date, "%Y-%m-%d")
         except Exception:
@@ -158,23 +158,22 @@ class ExpenseTrackerApp(tk.Tk):
         self.draw_charts()
 
     def draw_charts(self):
-        # Pie chart: sum by category last 30 days
+        # Pie chart
         data = self.db.get_sum_by_category()
         self.ax1.clear()
         if data:
             cats = list(data.keys())
             vals = list(data.values())
             self.ax1.pie(vals, labels=cats, autopct="%1.1f%%", startangle=140)
-            self.ax1.set_title("Spending by Category")
+            self.ax1.set_title("Spending by Category (last 30 days)")
         else:
             self.ax1.text(0.5, 0.5, "No data yet", ha='center')
         self.canvas1.draw()
 
-        # Bar chart: daily totals last 30 days
+        # Bar chart
         daily = self.db.get_daily_totals(days=30)
         self.ax2.clear()
         if daily:
-            # Use pandas for nicer handling (we import pandas at top)
             s = pd.Series(daily)
             s.index = pd.to_datetime(s.index)
             s = s.sort_index()
