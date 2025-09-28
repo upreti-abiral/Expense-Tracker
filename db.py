@@ -1,79 +1,83 @@
 # db.py
 import sqlite3
-from datetime import datetime
 
 class ExpenseDB:
-    def __init__(self, path="expenses.db"):
-        self.path = path
-        self.conn = sqlite3.connect(self.path)
+    def __init__(self, db_name="expenses.db"):
+        # row_factory lets us fetch rows as dictionaries
+        self.conn = sqlite3.connect(db_name)
         self.conn.row_factory = sqlite3.Row
-        self._create_table()
+        self.create_table()
 
-    def _create_table(self):
-        c = self.conn.cursor()
-        c.execute('''
-            CREATE TABLE IF NOT EXISTS expenses (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                date TEXT NOT NULL,
-                category TEXT NOT NULL,
-                amount REAL NOT NULL,
-                description TEXT
-            );
-        ''')
+    def create_table(self):
+        # Create table if not exists
+        query = """
+        CREATE TABLE IF NOT EXISTS expenses (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            amount REAL NOT NULL,
+            category TEXT,
+            date TEXT NOT NULL,
+            description TEXT
+        );
+        """
+        self.conn.execute(query)
         self.conn.commit()
 
-    def add_expense(self, amount, category, date=None, description=""):
-        if date is None or date.strip() == "":
-            date = datetime.today().strftime("%Y-%m-%d")
-        c = self.conn.cursor()
-        c.execute('INSERT INTO expenses (date, category, amount, description) VALUES (?, ?, ?, ?)',
-                  (date, category, float(amount), description))
+        # ✅ Ensure category column exists (old DBs might not have it)
+        try:
+            self.conn.execute("SELECT category FROM expenses LIMIT 1;")
+        except sqlite3.OperationalError:
+            self.conn.execute("ALTER TABLE expenses ADD COLUMN category TEXT DEFAULT 'Other';")
+            self.conn.commit()
+
+        # ✅ Ensure description column exists
+        try:
+            self.conn.execute("SELECT description FROM expenses LIMIT 1;")
+        except sqlite3.OperationalError:
+            self.conn.execute("ALTER TABLE expenses ADD COLUMN description TEXT DEFAULT '';")
+            self.conn.commit()
+
+    def add_expense(self, amount, category, date, description):
+        query = "INSERT INTO expenses (amount, category, date, description) VALUES (?, ?, ?, ?);"
+        self.conn.execute(query, (amount, category, date, description))
         self.conn.commit()
-        return c.lastrowid
+
+    def view_expenses(self):
+        query = "SELECT * FROM expenses;"
+        cursor = self.conn.execute(query)
+        return cursor.fetchall()
+
+    def get_expenses(self, limit=None):
+        query = "SELECT * FROM expenses ORDER BY date DESC"
+        if limit:
+            query += f" LIMIT {limit}"
+        cursor = self.conn.execute(query)
+        return cursor.fetchall()
 
     def delete_expense(self, expense_id):
-        c = self.conn.cursor()
-        c.execute('DELETE FROM expenses WHERE id = ?', (expense_id,))
+        query = "DELETE FROM expenses WHERE id = ?;"
+        self.conn.execute(query, (expense_id,))
         self.conn.commit()
 
-    def get_expenses(self, start_date=None, end_date=None, limit=1000):
-        c = self.conn.cursor()
-        query = 'SELECT * FROM expenses'
-        params = []
-        if start_date and end_date:
-            query += ' WHERE date BETWEEN ? AND ?'
-            params.extend([start_date, end_date])
-        elif start_date:
-            query += ' WHERE date >= ?'
-            params.append(start_date)
-        elif end_date:
-            query += ' WHERE date <= ?'
-            params.append(end_date)
-        query += ' ORDER BY date DESC LIMIT ?'
-        params.append(limit)
-        c.execute(query, params)
-        return [dict(row) for row in c.fetchall()]
-
-    def get_sum_by_category(self, start_date=None, end_date=None):
-        c = self.conn.cursor()
-        query = 'SELECT category, SUM(amount) as total FROM expenses'
-        params = []
-        if start_date and end_date:
-            query += ' WHERE date BETWEEN ? AND ?'
-            params.extend([start_date, end_date])
-        query += ' GROUP BY category ORDER BY total DESC'
-        c.execute(query, params)
-        return {row['category']: row['total'] for row in c.fetchall()}
+    def get_sum_by_category(self, days=30):
+        query = """
+        SELECT category, SUM(amount) as total
+        FROM expenses
+        WHERE date >= date('now', ?)
+        GROUP BY category;
+        """
+        cursor = self.conn.execute(query, (f"-{days} days",))
+        return {row["category"]: row["total"] for row in cursor.fetchall()}
 
     def get_daily_totals(self, days=30):
-        c = self.conn.cursor()
-        # SQLite: date("now", "-N days")
-        c.execute('''
-            SELECT date, SUM(amount) as total FROM expenses
-            WHERE date >= date("now", ?)
-            GROUP BY date ORDER BY date ASC
-        ''', (f"-{days} days",))
-        return {row['date']: row['total'] for row in c.fetchall()}
+        query = """
+        SELECT date, SUM(amount) as total
+        FROM expenses
+        WHERE date >= date('now', ?)
+        GROUP BY date
+        ORDER BY date ASC;
+        """
+        cursor = self.conn.execute(query, (f"-{days} days",))
+        return {row["date"]: row["total"] for row in cursor.fetchall()}
 
     def close(self):
         self.conn.close()
